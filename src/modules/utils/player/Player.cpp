@@ -200,10 +200,10 @@ void Player::on_gcode_received(void *argument)
                 // get size of file
                 int result = fseek(this->current_file_handler, 0, SEEK_END);
                 if (0 != result) {
-                        file_size = 0;
+                    this->file_size = 0;
                 } else {
-                        file_size = ftell(this->current_file_handler);
-                        fseek(this->current_file_handler, 0, SEEK_SET);
+                    this->file_size = ftell(this->current_file_handler);
+                    fseek(this->current_file_handler, 0, SEEK_SET);
                 }
             }
 
@@ -302,11 +302,11 @@ void Player::play_command( string parameters, StreamOutput *stream )
     int result = fseek(this->current_file_handler, 0, SEEK_END);
     if (0 != result) {
         stream->printf("WARNING - Could not get file size\r\n");
-        file_size = 0;
+        this->file_size = 0;
     } else {
-        file_size = ftell(this->current_file_handler);
+        this->file_size = ftell(this->current_file_handler);
         fseek(this->current_file_handler, 0, SEEK_SET);
-        stream->printf("  File size %ld\r\n", file_size);
+        stream->printf("  File size %ld\r\n", this->file_size);
     }
     this->played_cnt = 0;
     this->elapsed_secs = 0;
@@ -319,27 +319,27 @@ void Player::progress_command( string parameters, StreamOutput *stream )
     string options = shift_parameter( parameters );
     bool sdprinting= options.find_first_of("Bb") != string::npos;
 
-    if(!playing_file && current_file_handler != NULL) {
+    if(!this->playing_file && this->current_file_handler != NULL) {
         if(sdprinting)
-            stream->printf("SD printing byte %lu/%lu\r\n", played_cnt, file_size);
+            stream->printf("SD printing byte %lu/%lu\r\n", this->played_cnt, this->file_size);
         else
-            stream->printf("SD print is paused at %lu/%lu\r\n", played_cnt, file_size);
+            stream->printf("SD print is paused at %lu/%lu\r\n", this->played_cnt, this->file_size);
         return;
 
-    } else if(!playing_file) {
+    } else if(!this->playing_file) {
         stream->printf("Not currently playing\r\n");
         return;
     }
 
-    if(file_size > 0) {
+    if(this->file_size > 0) {
         unsigned long est = 0;
         if(this->elapsed_secs > 10) {
-            unsigned long bytespersec = played_cnt / this->elapsed_secs;
+            unsigned long bytespersec = this->played_cnt / this->elapsed_secs;
             if(bytespersec > 0)
-                est = (file_size - played_cnt) / bytespersec;
+                est = (this->file_size - this->played_cnt) / bytespersec;
         }
 
-        unsigned int pcnt = (file_size - (file_size - played_cnt)) * 100 / file_size;
+        unsigned int pcnt = (this->file_size - (this->file_size - this->played_cnt)) * 100 / this->file_size;
         // If -b or -B is passed, report in the format used by Marlin and the others.
         if (!sdprinting) {
             stream->printf("file: %s, %u %% complete, elapsed time: %02lu:%02lu:%02lu", this->filename.c_str(), pcnt, this->elapsed_secs / 3600, (this->elapsed_secs % 3600) / 60, this->elapsed_secs % 60);
@@ -348,7 +348,7 @@ void Player::progress_command( string parameters, StreamOutput *stream )
             }
             stream->printf("\r\n");
         } else {
-            stream->printf("SD printing byte %lu/%lu\r\n", played_cnt, file_size);
+            stream->printf("SD printing byte %lu/%lu\r\n", this->played_cnt, this->file_size);
         }
 
     } else {
@@ -358,18 +358,18 @@ void Player::progress_command( string parameters, StreamOutput *stream )
 
 void Player::abort_command( string parameters, StreamOutput *stream )
 {
-    if(!playing_file && current_file_handler == NULL) {
+    if(!this->playing_file && this->current_file_handler == NULL) {
         stream->printf("Not currently playing\r\n");
         return;
     }
-    suspended= false;
-    playing_file = false;
-    played_cnt = 0;
-    file_size = 0;
+    this->suspended= false;
+    this->playing_file = false;
+    this->played_cnt = 0;
+    this->file_size = 0;
     this->filename = "";
     this->current_stream = NULL;
-    fclose(current_file_handler);
-    current_file_handler = NULL;
+    fclose(this->current_file_handler);
+    this->current_file_handler = NULL;
     if(parameters.empty()) {
         // clear out the block queue, will wait until queue is empty
         // MUST be called in on_main_loop to make sure there are no blocked main loops waiting to put something on the queue
@@ -383,9 +383,9 @@ void Player::abort_command( string parameters, StreamOutput *stream )
 
 void Player::on_main_loop(void *argument)
 {
-    if(suspended && suspend_loops > 0) {
+    if(this->suspended && this->suspend_loops > 0) {
         // if we are suspended we need to allow main loop to cycle a few times then finish off the suspend processing
-        if(--suspend_loops == 0) {
+        if(--this->suspend_loops == 0) {
             suspend_part2();
             return;
         }
@@ -428,7 +428,7 @@ void Player::on_main_loop(void *argument)
 
                 // waits for the queue to have enough room
                 THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-                played_cnt += len;
+                this->played_cnt += len;
                 return; // we feed one line per main loop
 
             } else {
@@ -440,10 +440,10 @@ void Player::on_main_loop(void *argument)
 
         this->playing_file = false;
         this->filename = "";
-        played_cnt = 0;
-        file_size = 0;
+        this->played_cnt = 0;
+        this->file_size = 0;
         fclose(this->current_file_handler);
-        current_file_handler = NULL;
+        this->current_file_handler = NULL;
         this->current_stream = NULL;
 
         if(this->reply_stream != NULL) {
@@ -468,7 +468,7 @@ void Player::on_get_public_data(void *argument)
 
     } else if(pdr->second_element_is(get_progress_checksum)) {
         static struct pad_progress p;
-        if(file_size > 0 && playing_file) {
+        if(this->file_size > 0 && this->playing_file) {
             p.elapsed_secs = this->elapsed_secs;
             p.percent_complete = (this->file_size - (this->file_size - this->played_cnt)) * 100 / this->file_size;
             p.filename = this->filename;
@@ -505,7 +505,7 @@ User may jog or remove and insert filament at this point, extruding or retractin
 */
 void Player::suspend_command(string parameters, StreamOutput *stream )
 {
-    if(suspended) {
+    if(this->suspended) {
         stream->printf("Already suspended\n");
         return;
     }
@@ -515,7 +515,7 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
     // override the leave_heaters_on setting
     this->override_leave_heaters_on= (parameters == "h");
 
-    suspended= true;
+    this->suspended= true;
     if( this->playing_file ) {
         // pause an sd print
         this->playing_file = false;
@@ -527,7 +527,7 @@ void Player::suspend_command(string parameters, StreamOutput *stream )
     }
 
     // we need to allow main loop to cycle a few times to clear any buffered commands in the serial streams etc
-    suspend_loops= 10;
+    this->suspend_loops= 10;
 }
 
 // this completes the suspend
@@ -593,7 +593,7 @@ resume the suspended print
 */
 void Player::resume_command(string parameters, StreamOutput *stream )
 {
-    if(!suspended) {
+    if(!this->suspended) {
         stream->printf("Not suspended\n");
         return;
     }
@@ -637,7 +637,7 @@ void Player::resume_command(string parameters, StreamOutput *stream )
                 THEKERNEL->streams->printf("Resume aborted by kill\n");
                 THEROBOT->pop_state();
                 this->saved_temperatures.clear();
-                suspended= false;
+                this->suspended= false;
                 return;
             }
         }
@@ -684,5 +684,5 @@ void Player::resume_command(string parameters, StreamOutput *stream )
 
     // clean up
     this->saved_temperatures.clear();
-    suspended= false;
+    this->suspended= false;
 }
