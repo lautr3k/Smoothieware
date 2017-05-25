@@ -53,6 +53,7 @@ Player::Player()
     this->reply_stream = nullptr;
     this->suspended= false;
     this->suspend_loops= 0;
+    this->command_from_file = false;
 }
 
 void Player::on_module_loaded()
@@ -248,6 +249,18 @@ void Player::on_console_line_received( void *argument )
     string cmd = shift_parameter(possible_command);
 
     //new_message.stream->printf("Received %s\r\n", possible_command.c_str());
+
+    // on command line from file
+    // if (new_message.stream == &(StreamOutput::NullStream)) {
+    //     THEKERNEL->streams->printf("ON_FILE_LINE_RECEIVED: %s\r\n", possible_command.c_str());
+    // } else {
+    //     THEKERNEL->streams->printf("ON_CONSOLE_LINE_RECEIVED: %s\r\n", possible_command.c_str());
+    // }
+    this->command_from_file = (new_message.stream == &(StreamOutput::NullStream));
+
+    if (this->command_from_file) {
+      new_message.stream = THEKERNEL->streams; // fix output stream ...?
+    }
 
     // Act depending on command
     if (cmd == "play"){
