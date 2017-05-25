@@ -18,6 +18,11 @@ using std::string;
 
 class StreamOutput;
 
+struct stacked_file {
+    string filename;
+    uint32_t position;
+};
+
 class Player : public Module {
     public:
         Player();
@@ -40,12 +45,16 @@ class Player : public Module {
         string extract_options(string& args);
         void suspend_part2();
 
+        void get_current_file_size();
+
         string filename;
         string after_suspend_gcode;
         string before_resume_gcode;
         string on_boot_gcode;
         StreamOutput* current_stream;
         StreamOutput* reply_stream;
+
+        std::vector<stacked_file> file_stack;
 
         FILE* current_file_handler;
         long file_size;

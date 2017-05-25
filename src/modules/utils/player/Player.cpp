@@ -103,6 +103,17 @@ string Player::extract_options(string& args)
     return opts;
 }
 
+void Player::get_current_file_size(){
+    int result = fseek(this->current_file_handler, 0, SEEK_END);
+
+    if (0 != result) {
+      this->file_size = 0;
+    } else {
+      this->file_size = ftell(this->current_file_handler);
+      fseek(this->current_file_handler, 0, SEEK_SET);
+    }
+}
+
 void Player::on_gcode_received(void *argument)
 {
     Gcode *gcode = static_cast<Gcode *>(argument);
@@ -128,13 +139,7 @@ void Player::on_gcode_received(void *argument)
 
             } else {
                 // get size of file
-                int result = fseek(this->current_file_handler, 0, SEEK_END);
-                if (0 != result) {
-                    this->file_size = 0;
-                } else {
-                    this->file_size = ftell(this->current_file_handler);
-                    fseek(this->current_file_handler, 0, SEEK_SET);
-                }
+                this->get_current_file_size();
                 gcode->stream->printf("File opened:%s Size:%ld\r\n", this->filename.c_str(), this->file_size);
                 gcode->stream->printf("File selected\r\n");
             }
@@ -199,13 +204,7 @@ void Player::on_gcode_received(void *argument)
                 this->playing_file = true;
 
                 // get size of file
-                int result = fseek(this->current_file_handler, 0, SEEK_END);
-                if (0 != result) {
-                    this->file_size = 0;
-                } else {
-                    this->file_size = ftell(this->current_file_handler);
-                    fseek(this->current_file_handler, 0, SEEK_SET);
-                }
+                this->get_current_file_size();
             }
 
             this->played_cnt = 0;
@@ -279,15 +278,30 @@ void Player::on_console_line_received( void *argument )
 // Play a gcode file by considering each line as if it was received on the serial console
 void Player::play_command( string parameters, StreamOutput *stream )
 {
+    // recursive play
+    if(this->command_from_file) {
+        // If a file is already playing, we need to store it before trying to access a new one
+        this->file_stack.push_back({ this->filename, this->played_cnt });
+
+        // Then close the file so the new one can be open
+        this->playing_file = false;
+        this->filename = "";
+        this->played_cnt = 0;
+        this->file_size = 0;
+        fclose(this->current_file_handler);
+        this->current_file_handler = NULL;
+    }
+
+    // exit if suspended or playing and the command does not come from a file
+    else if(this->playing_file || this->suspended) {
+        stream->printf("Currently printing, abort print first\r\n");
+        return;
+    }
+
     // extract any options from the line and terminate the line there
     string options= extract_options(parameters);
     // Get filename which is the entire parameter line upto any options found or entire line
     this->filename = absolute_from_relative(parameters);
-
-    if(this->playing_file || this->suspended) {
-        stream->printf("Currently printing, abort print first\r\n");
-        return;
-    }
 
     if(this->current_file_handler != NULL) { // must have been a paused print
         fclose(this->current_file_handler);
@@ -312,15 +326,14 @@ void Player::play_command( string parameters, StreamOutput *stream )
     }
 
     // get size of file
-    int result = fseek(this->current_file_handler, 0, SEEK_END);
-    if (0 != result) {
+    this->get_current_file_size();
+
+    if (0 == this->file_size) {
         stream->printf("WARNING - Could not get file size\r\n");
-        this->file_size = 0;
     } else {
-        this->file_size = ftell(this->current_file_handler);
-        fseek(this->current_file_handler, 0, SEEK_SET);
         stream->printf("  File size %ld\r\n", this->file_size);
     }
+
     this->played_cnt = 0;
     this->elapsed_secs = 0;
 }
@@ -439,9 +452,12 @@ void Player::on_main_loop(void *argument)
                 message.message = buf;
                 message.stream = this->current_stream == nullptr ? &(StreamOutput::NullStream) : this->current_stream;
 
+                // Recursive branch note : this might need to move before calling the event
+                // or we'd be looping the recursion over and over
+                this->played_cnt += len;
+
                 // waits for the queue to have enough room
                 THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
-                this->played_cnt += len;
                 return; // we feed one line per main loop
 
             } else {
@@ -459,7 +475,27 @@ void Player::on_main_loop(void *argument)
         this->current_file_handler = NULL;
         this->current_stream = NULL;
 
-        if(this->reply_stream != NULL) {
+        if (!this->file_stack.empty()) {
+            // If there is a file in the stack, pop it and resume playing it
+            stacked_file file = this->file_stack.back();
+            this->file_stack.pop_back();
+
+            // Open the file
+            this->current_file_handler = fopen( file.filename.c_str(), "r");
+
+            // If the file was open
+            if( this->current_file_handler != NULL){
+                this->get_current_file_size();                                   // Get file size
+                this->filename = file.filename;                                  // Remember the filename
+                this->played_cnt = file.position;                                // Initialize counters
+                fseek( this->current_file_handler, this->played_cnt, SEEK_SET ); // Seek to the current position
+                this->playing_file = true;                                       // Resume playing
+            } else {
+              // TODO: handle error
+            }
+        }
+
+        else if(this->reply_stream != NULL) {
             // if we were printing from an M command from pronterface we need to send this back
             this->reply_stream->printf("Done printing file\r\n");
             this->reply_stream = NULL;
