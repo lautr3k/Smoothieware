@@ -396,6 +396,7 @@ void Player::abort_command( string parameters, StreamOutput *stream )
     this->current_stream = NULL;
     fclose(this->current_file_handler);
     this->current_file_handler = NULL;
+    this->file_stack.clear();
     if(parameters.empty()) {
         // clear out the block queue, will wait until queue is empty
         // MUST be called in on_main_loop to make sure there are no blocked main loops waiting to put something on the queue
