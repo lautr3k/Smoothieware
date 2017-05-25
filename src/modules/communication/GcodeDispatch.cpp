@@ -257,7 +257,8 @@ try_again:
                                 string str= single_command.substr(4) + possible_command;
                                 PublicData::set_value( panel_checksum, panel_display_message_checksum, &str );
                                 delete gcode;
-                                new_message.stream->printf("ok\r\n");
+                                THEKERNEL->streams->printf("%s\n", str.c_str()); //-> to serial console
+                                new_message.stream->printf("ok\r\n");            //-> to LCD panel
                                 return;
                             }
 
@@ -445,4 +446,3 @@ try_again:
         new_message.stream->printf("ok\r\n");
     }
 }
-
