@@ -9,13 +9,55 @@ You should have received a copy of the GNU General Public License along with Smo
 
 #include "Module.h"
 
+#include <string>
+using std::string;
+
+class StreamOutput;
+
+struct file_info {
+    string   path;
+    FILE*    file;
+    uint32_t size;
+    uint32_t read;
+};
+
 class Player : public Module {
     public:
         Player();
 
         void on_module_loaded();
-        void on_halt(void *argument);
-        void on_main_loop(void* argument);
-        void on_gcode_received(void *argument);
+
         void on_console_line_received(void* argument);
+        void on_gcode_received(void *argument);
+        void on_main_loop(void* argument);
+
+    private:
+        StreamOutput* output_stream;
+        file_info     current_file;
+
+        // file
+        bool open_file(string path);
+        void get_filesize();
+        void play_file();
+        void close_file();
+
+        // console
+        string extract_options(string& args);
+        void play_command(string args);
+        void progress_command(string args);
+        void suspend_command(string args);
+        void resume_command(string args);
+        void abort_command(string args);
+
+        // GMcode
+        void G28(string args);
+        void M21(string args);
+        bool M23(string args);
+        void M24(string args);
+        void M25(string args);
+        void M26(string args);
+        void M27(string args);
+        void M32(string args);
+        void M600(string args);
+        void M601(string args);
 };
