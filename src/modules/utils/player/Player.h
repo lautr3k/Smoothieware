@@ -34,11 +34,13 @@ class Player : public Module {
     private:
         StreamOutput* output_stream;
         file_info     current_file;
+        bool          playing;
 
         // file
         bool open_file(string path);
         void get_filesize();
         void play_file();
+        void pause_file();
         void close_file();
 
         // console

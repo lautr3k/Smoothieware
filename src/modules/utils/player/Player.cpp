@@ -21,6 +21,7 @@ Player::Player()
 {
     this->output_stream = NULL;
     this->current_file  = { "", NULL, 0, 0 }; // { path, file, size, read }
+    this->playing       = false;
 }
 
 void Player::on_module_loaded()
@@ -38,12 +39,66 @@ void Player::on_main_loop(void* argument)
     if (THEKERNEL->is_halted()) {
         return;
     }
+
+    // exit, if no in play mode
+    if (!this->playing) {
+        return;
+    }
+
+    char buf[130]; // lines upto 128 characters are allowed, anything longer is discarded
+    bool discard = false;
+
+    while(fgets(buf, sizeof(buf), this->current_file.file) != NULL) {
+        int len = strlen(buf);
+
+        // skip empty line (not possible ?)
+        if (len == 0) {
+            continue;
+        }
+
+        // save readed bytes
+        this->current_file.read += len;
+
+        if (buf[len - 1] == '\n' || feof(this->current_file.file)) {
+            // we are discarding a long line
+            if (discard) {
+                discard = false;
+                continue;
+            }
+
+            // skip empty line
+            if (len == 1) {
+                continue;
+            }
+
+            // create serial message
+            struct SerialMessage serial;
+            serial.message = buf;
+            serial.stream  = this->output_stream;
+
+            // waits for the queue to have enough room
+            THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &serial);
+
+            return; // we feed one line per main loop
+        }
+        else {
+            // discard long line
+            this->output_stream->printf("Warning: Discarded long line\n");
+            discard = true;
+        }
+    }
+
+    this->output_stream->printf("Print done\n");
+    this->pause_file();
 }
 
 // FILE HELPERS ----------------------------------------------------------------
 
 bool Player::open_file(string path)
 {
+    // pause playing file
+    this->pause_file();
+
     // close opened file
     this->close_file();
 
@@ -51,17 +106,21 @@ bool Player::open_file(string path)
     this->current_file = { path, NULL, 0, 0 };
 
     // DEBUG
-    //THEKERNEL->streams->printf("open_file: %s\r\n", this->current_file.path.c_str());
+    THEKERNEL->streams->printf("open_file: %s\r\n", this->current_file.path.c_str());
 
     // open new file
-    this->current_file.file = fopen(this->current_file.path.c_str(), "r");
+    FILE* file = fopen(this->current_file.path.c_str(), "r");
 
-    // get file size
-    if (this->current_file.file != NULL) {
+    // DEBUG
+    THEKERNEL->streams->printf("openend: %s\r\n", this->current_file.path.c_str());
+
+    // set file handler and size
+    if (0 != file) {
+        this->current_file.file = file;
         this->get_filesize();
 
         // DEBUG
-        //THEKERNEL->streams->printf("file size: %ld\r\n", this->current_file.size);
+        THEKERNEL->streams->printf("file size: %ld\r\n", this->current_file.size);
 
         return true;
     }
@@ -91,10 +150,20 @@ void Player::play_file()
     this->playing = this->current_file.file != NULL;
 }
 
+void Player::pause_file()
+{
+    // DEBUG
+    //THEKERNEL->streams->printf("pause_file: %s\r\n", this->current_file.path.c_str());
+
+    // pause play
+    this->playing = false;
+}
+
 void Player::close_file()
 {
     if (this->current_file.file != NULL) {
         fclose(this->current_file.file);
+        this->current_file.file = NULL;
     }
 }
 
@@ -117,9 +186,9 @@ void Player::on_console_line_received(void* argument)
     }
 
     // set output stream
-    if (this->output_stream == NULL) {
+    //if (this->output_stream == NULL) {
         this->output_stream = serial.stream;
-    }
+    //}
 
     // DEBUG
     THEKERNEL->streams->printf("ON_CONSOLE_LINE_RECEIVED: %s\r\n", arguments.c_str());
@@ -227,9 +296,9 @@ void Player::on_gcode_received(void *argument)
     string arguments = get_arguments(gcode->get_command());
 
     // set output stream
-    if (this->output_stream == NULL) {
+    //if (this->output_stream == NULL) {
         this->output_stream = gcode->stream;
-    }
+    //}
 
     // DEBUG
     THEKERNEL->streams->printf("ON_GCODE_RECEIVED: %s\r\n", arguments.c_str());
@@ -327,7 +396,7 @@ void Player::M32(string arguments)
 
     // try to open/select file
     if (this->M23(arguments)) {
-        this->play_file();
+        this->M24(arguments); // play file
     }
 }
 
