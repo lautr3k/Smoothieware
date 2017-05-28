@@ -21,7 +21,7 @@ extern SDFAT mounter;
 
 Player::Player() {
     this->file_handler = NULL;
-    this->reset_file("");
+    this->reset_file("", 0, 0, 0); // path, size, line, read
 }
 
 void Player::on_module_loaded()
@@ -33,26 +33,24 @@ void Player::on_module_loaded()
 
 // FILE HELPERS ----------------------------------------------------------------
 
-void Player::reset_file(string path)
+void Player::reset_file(string path, long int size, int line, long int read)
 {
     this->file_path    = path;
-    this->file_size    = 0;
-    this->file_line    = 0;
+    this->file_size    = size;
+    this->file_line    = line;
+    this->file_read    = read;
     this->file_playing = false;
     this->file_paused  = false;
 }
 
-long int Player::get_file_size(FILE* &file)
+void Player::get_file_size()
 {
-    int result = fseek(file, 0, SEEK_END);
-
-    if (result != 0) {
-        return 0;
+    if (fseek(this->file_handler, 0, SEEK_END) != 0) {
+        this->file_size = 0;
+    } else {
+        this->file_size = ftell(this->file_handler);
+        fseek(this->file_handler, 0, SEEK_SET);
     }
-
-    long int size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-    return size;
 }
 
 // return -1: file not found
@@ -69,16 +67,16 @@ int Player::open_file(string path)
         // If a file is already playing,
         // we need to store it before trying to access a new one
         this->file_stack.push_back({
-            this->file_path, this->file_size, this->file_line
+            this->file_path, this->file_size, this->file_line, this->file_read
         });
 
         // DEBUG
-        THEKERNEL->streams->printf("---> path: %s, size: %li, line: %li\r\n", this->file_path.c_str(), this->file_size, this->file_line);
-        THEKERNEL->streams->printf("---> stack size: %i\r\n", this->file_stack.size());
+        // THEKERNEL->streams->printf("---> path: %s, size: %li, line: %d\r\n", this->file_path.c_str(), this->file_size, this->file_line);
+        // THEKERNEL->streams->printf("---> stack size: %i\r\n", this->file_stack.size());
     }
 
     // reset file members
-    this->reset_file(path);
+    this->reset_file(path, 0, 0, 0); // path, size, line, read
 
     // (re)open file
     if (this->file_handler == NULL) {
@@ -94,38 +92,41 @@ int Player::open_file(string path)
     }
 
     // get file size
-    this->file_size = this->get_file_size(this->file_handler);
+    this->get_file_size();
 
     return 1;
 }
 
 // from FileConfigSource::readLine
-bool Player::read_file_line(string& line, int lineno, FILE *fp)
+bool Player::read_file_line(string& line)
 {
     char buf[132];
 
-    char *l = fgets(buf, sizeof(buf) - 1, fp);
+    char *new_line = fgets(buf, sizeof(buf) - 1, this->file_handler);
 
-    if (l != NULL) {
-        if (buf[strlen(l) - 1] != '\n') {
-            // truncate long lines
-            if (lineno != 0) {
-                // report if it is not truncating a comment
-                if (strchr(buf, ';') == NULL || strchr(buf, '(') == NULL) {
-                    THEKERNEL->streams->printf("Truncated long line %d in: %s\n", lineno, this->file_path.c_str());
-                }
-            }
-
-            // read until the next \n or eof
-            int c;
-            while ((c = fgetc(fp)) != '\n' && c != EOF) /* discard */;
-        }
-
-        line.assign(buf);
-        return true;
+    if (new_line == NULL) {
+        return false;
     }
 
-    return false;
+    int len = strlen(new_line);
+
+    this->file_read += len;
+    this->file_line++;
+
+    // truncate long lines
+    if (buf[len - 1] != '\n') {
+        // report if it is not truncating a comment
+        if (strchr(buf, ';') == NULL || strchr(buf, '(') == NULL) {
+            THEKERNEL->streams->printf("Truncated long line %d in: %s\n", this->file_line, this->file_path.c_str());
+        }
+
+        // read until the next \n or eof
+        int c;
+        while ((c = fgetc(this->file_handler)) != '\n' && c != EOF) /* discard */;
+    }
+
+    line.assign(buf);
+    return true;
 }
 
 void Player::play_file()
@@ -240,7 +241,23 @@ void Player::on_gcode_received(void *argument)
 
 bool Player::M23(string args)
 {
-    return this->open_file("/sd/" + args);
+    // open and play file
+    int result = this->open_file("/sd/" + args);
+
+    if (result == 1) {
+        return true;
+    }
+
+    if (result == 0) {
+        // DEBUG
+        THEKERNEL->streams->printf("can not open file: %s\r\n", this->file_path.c_str());
+    }
+    else if (result == -1) {
+        // DEBUG
+        THEKERNEL->streams->printf("file not found: %s\r\n", this->file_path.c_str());
+    }
+
+    return false;
 }
 
 void Player::M24(string args)
@@ -264,7 +281,7 @@ void Player::on_main_loop(void* argument)
         return;
     }
 
-    // exit, not playing file
+    // exit, if not playing file
     if (! this->file_playing || this->file_handler == NULL) {
         return;
     }
@@ -274,15 +291,15 @@ void Player::on_main_loop(void* argument)
         string line;
 
         // break loop, if an error occured reading the line
-        if (! this->read_file_line(line, this->file_line++, this->file_handler)) {
+        if (! this->read_file_line(line)) {
             break;
         }
 
         // send line as serial message
         struct SerialMessage message;
 
-        message.message = line;
-        message.stream  = &(StreamOutput::NullStream);
+        message.message = line.c_str();
+        message.stream  = THEKERNEL->streams;
 
         THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
 
@@ -291,7 +308,7 @@ void Player::on_main_loop(void* argument)
     }
 
     // pause file
-    //this->pause_file();
+    this->pause_file();
 
     // If there is a file in the stack
     if (! this->file_stack.empty()) {
@@ -300,14 +317,30 @@ void Player::on_main_loop(void* argument)
         this->file_stack.pop_back();
 
         // DEBUG
-        THEKERNEL->streams->printf("<--- path: %s, size: %li, line: %li\r\n", file.path.c_str(), file.size, file.line);
-        THEKERNEL->streams->printf("<--- stack size: %i\r\n", this->file_stack.size());
+        // THEKERNEL->streams->printf("<--- path: %s, size: %li, line: %d\r\n", file.path.c_str(), file.size, file.line);
+        // THEKERNEL->streams->printf("<--- stack size: %i\r\n", this->file_stack.size());
 
-        // reopen file
-        this->file_path    = file.path;
-        this->file_size    = file.size;
-        this->file_line    = file.line + 1;
-        this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
+        // remember parent file
+        this->reset_file(file.path, file.size, file.line, file.read);
+
+        // (re)open file
+        // this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
+        if (this->file_handler == NULL) {
+            this->file_handler = fopen(file.path.c_str(), "r");
+        }
+        else {
+            this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
+        }
+
+        // can not open file
+        if (this->file_handler == NULL) {
+            // DEBUG
+            THEKERNEL->streams->printf("can not open file: %s\r\n", file.path.c_str());
+            return;
+        }
+
+        // remember file position
+        fseek(this->file_handler, this->file_read, SEEK_SET);
 
         // play file
         this->play_file();
@@ -317,6 +350,7 @@ void Player::on_main_loop(void* argument)
     }
 
     // play done
+    fclose(this->file_handler);
     this->stop_file();
 
     // DEBUG

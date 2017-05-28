@@ -17,7 +17,8 @@ using std::string;
 struct stacked_file {
     string   path;
     long int size;
-    long int line;
+    int      line;
+    long int read;
 };
 
 class Player : public Module {
@@ -35,19 +36,20 @@ class Player : public Module {
         FILE*    file_handler;
         string   file_path;
         long int file_size;
-        long int file_line;
+        int      file_line;
+        long int file_read;
         bool     file_playing;
         bool     file_paused;
 
         std::vector<stacked_file> file_stack;
 
-        void     reset_file(string path);
-        long int get_file_size(FILE* &file);
-        int      open_file(string path);
-        bool     read_file_line(string& line, int lineno, FILE *fp);
-        void     play_file();
-        void     pause_file();
-        void     stop_file();
+        void reset_file(string path, long int size, int line, long int read);
+        void get_file_size();
+        int  open_file(string path);
+        bool read_file_line(string& line);
+        void play_file();
+        void pause_file();
+        void stop_file();
 
         // console
         string extract_options(string& args);
