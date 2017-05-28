@@ -5,23 +5,23 @@ Smoothie is distributed in the hope that it will be useful, but WITHOUT ANY WARR
 You should have received a copy of the GNU General Public License along with Smoothie. If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mbed.h";
 #include "Player.h"
 
-#include "libs/Kernel.h"
+#include "mbed.h"
 #include "Gcode.h"
+#include "SDFAT.h"
+
 #include "libs/utils.h"
+#include "libs/Kernel.h"
 #include "libs/StreamOutput.h"
 #include "libs/SerialMessage.h"
 #include "libs/StreamOutputPool.h"
 
-// #include "SDFAT.h"
-// extern SDFAT mounter;
-
+extern SDFAT mounter;
 
 Player::Player() {
-    this->reset_file("");
     this->file_handler = NULL;
+    this->reset_file("");
 }
 
 void Player::on_module_loaded()
@@ -38,12 +38,11 @@ void Player::reset_file(string path)
     this->file_path    = path;
     this->file_size    = 0;
     this->file_line    = 1;
-    //this->file_handler = NULL;
     this->file_playing = false;
     this->file_paused  = false;
 }
 
-long int Player::get_filesize(FILE* &file)
+long int Player::get_file_size(FILE* &file)
 {
     int result = fseek(file, 0, SEEK_END);
 
@@ -56,27 +55,15 @@ long int Player::get_filesize(FILE* &file)
     return size;
 }
 
-void Player::close_file()
-{
-    if (this->file_handler != NULL) {
-        fclose(this->file_handler);
-        free(this->file_handler);
-        wait(0.1); // ???
-        this->file_handler = NULL;
-    }
-}
-
 // return -1: file not found
 // return  0: can not open file
 // return  1: file opened
 int Player::open_file(string path)
 {
-    if(! file_exists(path.c_str())) {
+    // file not found
+    if (! file_exists(path.c_str())) {
         return -1;
     }
-
-    // close opened file
-    //this->close_file();
 
     // reset file members
     this->reset_file(path);
@@ -89,43 +76,62 @@ int Player::open_file(string path)
         this->file_handler = freopen(path.c_str(), "r", this->file_handler);
     }
 
-    //wait(0.1); // ???
-
     // can not open file
     if (this->file_handler == NULL) {
         return 0;
     }
 
     // get file size
-    this->file_size = this->get_filesize(this->file_handler);
+    this->file_size = this->get_file_size(this->file_handler);
 
     return 1;
 }
 
 // from FileConfigSource::readLine
-bool Player::readLine(string& line, int lineno, FILE *fp)
+bool Player::read_file_line(string& line, int lineno, FILE *fp)
 {
     char buf[132];
-    char *l= fgets(buf, sizeof(buf)-1, fp);
-    if(l != NULL) {
-        if(buf[strlen(l)-1] != '\n') {
+
+    char *l = fgets(buf, sizeof(buf) - 1, fp);
+
+    if (l != NULL) {
+        if (buf[strlen(l) - 1] != '\n') {
             // truncate long lines
-            if(lineno != 0) {
+            if (lineno != 0) {
                 // report if it is not truncating a comment
-                if(strchr(buf, '#') == NULL){
-                    // DEBUG
+                if (strchr(buf, ';') == NULL || strchr(buf, '(') == NULL) {
                     THEKERNEL->streams->printf("Truncated long line %d in: %s\n", lineno, this->file_path.c_str());
                 }
             }
+
             // read until the next \n or eof
             int c;
-            while((c=fgetc(fp)) != '\n' && c != EOF) /* discard */;
+            while ((c = fgetc(fp)) != '\n' && c != EOF) /* discard */;
         }
+
         line.assign(buf);
         return true;
     }
 
     return false;
+}
+
+void Player::play_file()
+{
+    this->file_playing = true;
+    this->file_paused  = false;
+}
+
+void Player::pause_file()
+{
+    this->file_playing = false;
+    this->file_paused  = true;
+}
+
+void Player::stop_file()
+{
+    this->file_playing = false;
+    this->file_paused  = false;
 }
 
 // ON_CONSOLE_LINE_RECEIVED ----------------------------------------------------
@@ -149,7 +155,7 @@ void Player::on_console_line_received(void* argument)
     // extract command name
     string cmd = shift_parameter(arguments);
 
-    // Act depending on command
+    // Act depending on command name
     if (cmd == "play") {
         this->play_command(arguments);
     }
@@ -183,7 +189,7 @@ void Player::play_command(string arguments)
     int result = this->open_file(path);
 
     if (result == 1) {
-        this->file_playing = true;
+        this->play_file();
     }
     else if (result == 0) {
         // DEBUG
@@ -203,6 +209,38 @@ void Player::on_gcode_received(void *argument)
     if (THEKERNEL->is_halted()) {
         return;
     }
+
+    // get gcode arguments
+    Gcode *gcode     = static_cast<Gcode *>(argument);
+    string arguments = get_arguments(gcode->get_command());
+
+    // Act depending on gcode
+    if (gcode->has_m) {
+        if (gcode->m == 23) {
+            this->M23(arguments); // open file
+        } else if (gcode->m == 24) {
+            this->M24(arguments); // play file
+        } else if (gcode->m == 32) {
+            this->M32(arguments); // open and play file
+        }
+    }
+}
+
+bool Player::M23(string args)
+{
+    return this->open_file("/sd/" + args);
+}
+
+void Player::M24(string args)
+{
+    this->play_file();
+}
+
+void Player::M32(string args)
+{
+    if (this->M23(args)) {
+        this->M24(args);
+    }
 }
 
 // ON_MAIN_LOOP ----------------------------------------------------------------
@@ -215,7 +253,7 @@ void Player::on_main_loop(void* argument)
     }
 
     // exit, not playing file
-    if (! this->file_playing) {
+    if (! this->file_playing || this->file_handler == NULL) {
         return;
     }
 
@@ -224,7 +262,7 @@ void Player::on_main_loop(void* argument)
         string line;
 
         // break loop, if an error occured reading the line
-        if (! this->readLine(line, this->file_line++, this->file_handler)) {
+        if (! this->read_file_line(line, this->file_line++, this->file_handler)) {
             break;
         }
 
@@ -241,7 +279,7 @@ void Player::on_main_loop(void* argument)
     }
 
     // play done
-    this->file_playing = false;
+    this->stop_file();
 
     // DEBUG
     THEKERNEL->streams->printf("play done !\r\n");

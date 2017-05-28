@@ -24,20 +24,20 @@ class Player : public Module {
 
     private:
         // file
-        string   file_path;
         FILE*    file_handler;
+        string   file_path;
         long int file_size;
         long int file_line;
         bool     file_playing;
         bool     file_paused;
 
-        void     close_file();
         void     reset_file(string path);
-        long int get_filesize(FILE* &file);
+        long int get_file_size(FILE* &file);
         int      open_file(string path);
-        bool     readLine(string& line, int lineno, FILE *fp);
-        // void     play_file();
-        // void     pause_file();
+        bool     read_file_line(string& line, int lineno, FILE *fp);
+        void     play_file();
+        void     pause_file();
+        void     stop_file();
 
         // console
         string extract_options(string& args);
@@ -50,12 +50,12 @@ class Player : public Module {
         // GMcode
         // void G28(string args);
         // void M21(string args);
-        // bool M23(string args);
-        // void M24(string args);
+        bool M23(string args);
+        void M24(string args);
         // void M25(string args);
         // void M26(string args);
         // void M27(string args);
-        // void M32(string args);
+        void M32(string args);
         // void M600(string args);
         // void M601(string args);
 };
