@@ -37,7 +37,7 @@ void Player::reset_file(string path)
 {
     this->file_path    = path;
     this->file_size    = 0;
-    this->file_line    = 1;
+    this->file_line    = 0;
     this->file_playing = false;
     this->file_paused  = false;
 }
@@ -63,6 +63,18 @@ int Player::open_file(string path)
     // file not found
     if (! file_exists(path.c_str())) {
         return -1;
+    }
+
+    if (this->file_playing) {
+        // If a file is already playing,
+        // we need to store it before trying to access a new one
+        this->file_stack.push_back({
+            this->file_path, this->file_size, this->file_line
+        });
+
+        // DEBUG
+        THEKERNEL->streams->printf("---> path: %s, size: %li, line: %li\r\n", this->file_path.c_str(), this->file_size, this->file_line);
+        THEKERNEL->streams->printf("---> stack size: %i\r\n", this->file_stack.size());
     }
 
     // reset file members
@@ -273,6 +285,32 @@ void Player::on_main_loop(void* argument)
         message.stream  = &(StreamOutput::NullStream);
 
         THEKERNEL->call_event(ON_CONSOLE_LINE_RECEIVED, &message);
+
+        // exit main loop
+        return;
+    }
+
+    // pause file
+    //this->pause_file();
+
+    // If there is a file in the stack
+    if (! this->file_stack.empty()) {
+        // pop it and resume playing it
+        stacked_file file = this->file_stack.back();
+        this->file_stack.pop_back();
+
+        // DEBUG
+        THEKERNEL->streams->printf("<--- path: %s, size: %li, line: %li\r\n", file.path.c_str(), file.size, file.line);
+        THEKERNEL->streams->printf("<--- stack size: %i\r\n", this->file_stack.size());
+
+        // reopen file
+        this->file_path    = file.path;
+        this->file_size    = file.size;
+        this->file_line    = file.line + 1;
+        this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
+
+        // play file
+        this->play_file();
 
         // exit main loop
         return;

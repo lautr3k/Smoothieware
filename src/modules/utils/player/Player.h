@@ -10,7 +10,15 @@ You should have received a copy of the GNU General Public License along with Smo
 #include "Module.h"
 
 #include <string>
+#include <vector>
+
 using std::string;
+
+struct stacked_file {
+    string   path;
+    long int size;
+    long int line;
+};
 
 class Player : public Module {
     public:
@@ -30,6 +38,8 @@ class Player : public Module {
         long int file_line;
         bool     file_playing;
         bool     file_paused;
+
+        std::vector<stacked_file> file_stack;
 
         void     reset_file(string path);
         long int get_file_size(FILE* &file);
