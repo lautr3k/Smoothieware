@@ -100,6 +100,10 @@ int Player::open_file(string path)
 // from FileConfigSource::readLine
 bool Player::read_file_line(string& line)
 {
+    if (this->file_handler == NULL || feof(this->file_handler)) {
+        return false;
+    }
+
     char buf[132];
 
     char *new_line = fgets(buf, sizeof(buf) - 1, this->file_handler);
@@ -286,15 +290,10 @@ void Player::on_main_loop(void* argument)
         return;
     }
 
-    // For each line
-    while(! feof(this->file_handler)) {
-        string line;
+    // get next line
+    string line;
 
-        // break loop, if an error occured reading the line
-        if (! this->read_file_line(line)) {
-            break;
-        }
-
+    if (this->read_file_line(line)) {
         // send line as serial message
         struct SerialMessage message;
 
