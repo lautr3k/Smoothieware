@@ -323,13 +323,7 @@ void Player::on_main_loop(void* argument)
         this->reset_file(file.path, file.size, file.line, file.read);
 
         // (re)open file
-        // this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
-        if (this->file_handler == NULL) {
-            this->file_handler = fopen(file.path.c_str(), "r");
-        }
-        else {
-            this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
-        }
+        this->file_handler = freopen(file.path.c_str(), "r", this->file_handler);
 
         // can not open file
         if (this->file_handler == NULL) {
